@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let app = Router::new()
-        .route("/", get(get_status))
+        .route("/", get(get_status).options(get_status))
         .layer(Extension(axum_status_holder));
     let listener = TcpListener::bind(&options.bind_host).await?;
     let axum_serve_future = axum::serve(listener, app).into_future();
