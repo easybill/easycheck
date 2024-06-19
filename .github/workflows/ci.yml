@@ -1,0 +1,132 @@
+name: "CI"
+
+on:
+  push:
+    branches: [ "**" ]
+    tags-ignore: [ "**" ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        type: boolean
+        description: Publish Release
+
+concurrency:
+  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  check:
+    name: Run checks
+    runs-on: ubuntu-latest
+
+    permissions:
+      checks: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Run rustfmt
+        uses: clechasseur/rs-fmt-check@v2
+
+      - name: Run clippy
+        uses: clechasseur/rs-clippy-check@v3
+
+  build:
+    permissions: read-all
+    runs-on: ${{ matrix.platform.os }}
+    name: Compile ${{ matrix.platform.target }} / ${{ matrix.platform.os }}
+
+    strategy:
+      fail-fast: true
+      matrix:
+        platform:
+          # mac target
+          - { os: 'macos-latest', target: 'x86_64-apple-darwin', arch: 'x86_64', osn: 'mac' }
+          - { os: 'macos-latest', target: 'aarch64-apple-darwin', arch: 'aarch64', osn: 'mac' }
+          # linux target
+          - { os: 'ubuntu-latest', target: 'x86_64-unknown-linux-musl', arch: 'x86_64', osn: 'linux' }
+          - { os: 'ubuntu-latest', target: 'aarch64-unknown-linux-musl', arch: 'aarch64', osn: 'linux' }
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.platform.target }}
+
+      - name: Initialize Rust caching
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform.target }}
+
+      - name: Compile Binary
+        uses: clechasseur/rs-cargo@v2
+        with:
+          command: build
+          use-cross: true
+          args: --release --target ${{ matrix.platform.target }} --bin easycheck
+
+      - name: Move artifacts
+        run: |
+          mkdir -p artifact
+          cp target/${{ matrix.platform.target }}/release/easycheck artifact/easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: artifact/easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
+          name: easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
+
+  release:
+    needs: [ "check", "build" ]
+    name: Publish Release
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' }}
+
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Build tag name
+        env:
+          RUN: ${{ github.run_number }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: echo "TAG_NAME=1.$RUN.$(($ATTEMPT - 1))" >> $GITHUB_ENV;
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+
+      - name: Generate changelog
+        id: changelog_generate
+        uses: mikepenz/release-changelog-builder-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          ignorePreReleases: true
+          toTag: ${{ github.sha }}
+          configurationJson: '{"max_tags_to_fetch":5,"categories":[],"template":"#{{UNCATEGORIZED}}","pr_template":"- #{{TITLE}} (##{{NUMBER}} by #{{AUTHOR}})"}'
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          tag_name: ${{ env.TAG_NAME }}
+          body: ${{steps.changelog_generate.outputs.changelog}}
+          fail_on_unmatched_files: true
+          files: |
+            binaries/*/*
