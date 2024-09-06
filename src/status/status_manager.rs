@@ -1,13 +1,13 @@
-use axum::http::StatusCode;
-use futures::future::join_all;
-use tokio::time::Instant;
-
+use crate::checks::force_success_file_check::ForceSuccessFileCheck;
 use crate::checks::http_response_check::HttpResponseCheck;
 use crate::checks::mtc_file_check::MtcFileCheck;
 use crate::checks::network_connection_check::NetworkConnectionCheck;
 use crate::options::Options;
 use crate::status::status_checker::StatusChecker;
 use crate::status::status_holder::{FailingCheck, StatusCheckResults, StatusHolder};
+use axum::http::StatusCode;
+use futures::future::join_all;
+use tokio::time::Instant;
 
 /// The managing service for status checks.
 pub(crate) struct StatusManager {
@@ -44,6 +44,10 @@ impl StatusManager {
         let mut status_checker: Vec<Box<dyn StatusChecker>> = vec![];
         Self::register_checker_if_enabled(
             &mut status_checker,
+            ForceSuccessFileCheck::from_options(options),
+        )?;
+        Self::register_checker_if_enabled(
+            &mut status_checker,
             MtcFileCheck::from_options(options),
         )?;
         Self::register_checker_if_enabled(
@@ -69,9 +73,8 @@ impl StatusManager {
     /// Executes all registered status checks and sets the current
     /// status based on their execution results.
     pub async fn execute_status_checks(&self) {
-        let mut failed_checks: Vec<FailingCheck> = vec![];
-
         // execute all status checks in parallel
+        let mut failed_checks: Vec<FailingCheck> = vec![];
         let check_futures: Vec<_> = self
             .status_checker
             .iter()
@@ -81,11 +84,31 @@ impl StatusManager {
         for (checker, result) in self.status_checker.iter().zip(results) {
             match result {
                 Ok(check_result) => {
-                    // check was successful, check if the checker returned a check error
-                    // and push the result in that failure case
-                    if let Some(failure_reason) = check_result.failure_reason {
-                        let failing_check = FailingCheck::new_from_check(checker, failure_reason);
-                        failed_checks.push(failing_check);
+                    match check_result.failure_reason {
+                        // failure reason is present and all other checks should be skipped, only
+                        // return this failure reason
+                        Some(failure_reason) if check_result.ignore_other_results => {
+                            let failing_check =
+                                FailingCheck::new_from_check(checker, failure_reason);
+                            failed_checks = vec![failing_check];
+                            break;
+                        }
+                        // failure reason is present but other checks shouldn't be skipped,
+                        // register the failure reason and continue
+                        Some(failure_reason) => {
+                            let failing_check =
+                                FailingCheck::new_from_check(checker, failure_reason);
+                            failed_checks.push(failing_check);
+                        }
+                        // the check was successful and all other results should be skipped,
+                        // remove all failure reasons and use the successful result
+                        None if check_result.ignore_other_results => {
+                            failed_checks.clear();
+                            break;
+                        }
+                        // the check was successful and other checks should be considered as well,
+                        // just continue looking at the other results
+                        None => {}
                     }
                 }
                 Err(error) => {
