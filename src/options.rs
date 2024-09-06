@@ -14,6 +14,12 @@ pub(crate) struct Options {
         default_value_t = 5
     )]
     pub revalidate_interval_seconds: u64,
+    // file path for force success check
+    #[arg(
+        long = "force-success-file-path",
+        env = "EASYCHECK_FORCE_SUCCESS_FILE_PATH"
+    )]
+    pub force_success_file_path: Option<String>,
     // file path for mtc check
     #[arg(long = "mtc-file-path", env = "EASYCHECK_MTC_FILE_PATH")]
     pub mtc_check_file_path: Option<String>,

@@ -7,6 +7,7 @@ pub(crate) struct StatusCheckResult {
     /// The reason why the status check failed. If present the check is
     /// considered as failed, if absent the check was successful.
     pub failure_reason: Option<String>,
+    pub ignore_other_results: bool,
 }
 
 /// Defines the shared behaviour how status checks are executed.
@@ -33,6 +34,7 @@ impl StatusCheckResult {
     pub fn new_success() -> Self {
         Self {
             failure_reason: None,
+            ignore_other_results: false,
         }
     }
 
@@ -40,6 +42,14 @@ impl StatusCheckResult {
     pub fn new_failure(failure_reason: String) -> Self {
         Self {
             failure_reason: Some(failure_reason),
+            ignore_other_results: false,
+        }
+    }
+
+    pub fn ignore_other_results(self) -> Self {
+        Self {
+            failure_reason: self.failure_reason,
+            ignore_other_results: true,
         }
     }
 }
