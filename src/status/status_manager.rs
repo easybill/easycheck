@@ -84,24 +84,30 @@ impl StatusManager {
         for (checker, result) in self.status_checker.iter().zip(results) {
             match result {
                 Ok(check_result) => {
-                    // check was successful, check if the checker returned a check error
-                    // and push the result in that failure case
                     match check_result.failure_reason {
+                        // failure reason is present and all other checks should be skipped, only
+                        // return this failure reason
                         Some(failure_reason) if check_result.ignore_other_results => {
                             let failing_check =
                                 FailingCheck::new_from_check(checker, failure_reason);
                             failed_checks = vec![failing_check];
                             break;
                         }
+                        // failure reason is present but other checks shouldn't be skipped,
+                        // register the failure reason and continue
                         Some(failure_reason) => {
                             let failing_check =
                                 FailingCheck::new_from_check(checker, failure_reason);
                             failed_checks.push(failing_check);
                         }
+                        // the check was successful and all other results should be skipped,
+                        // remove all failure reasons and use the successful result
                         None if check_result.ignore_other_results => {
                             failed_checks.clear();
                             break;
                         }
+                        // the check was successful and other checks should be considered as well,
+                        // just continue looking at the other results
                         None => {}
                     }
                 }

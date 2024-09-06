@@ -7,6 +7,8 @@ pub(crate) struct StatusCheckResult {
     /// The reason why the status check failed. If present the check is
     /// considered as failed, if absent the check was successful.
     pub failure_reason: Option<String>,
+    /// Indicate if results from other status checkers should be ignored
+    /// and only this result should be returned.
     pub ignore_other_results: bool,
 }
 
@@ -46,6 +48,9 @@ impl StatusCheckResult {
         }
     }
 
+    /// Enables that only this result will be used to determine the service
+    /// status. If this is enabled on multiple results, the first result with
+    /// this flag set will be used as the final response.
     pub fn ignore_other_results(self) -> Self {
         Self {
             failure_reason: self.failure_reason,
