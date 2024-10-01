@@ -1,8 +1,14 @@
 use std::net::SocketAddr;
 
 use axum::http::Method;
-use clap::Parser;
-use reqwest::{StatusCode, Url};
+use clap::{Parser, ValueEnum};
+use hyper::{StatusCode, Uri};
+
+#[derive(ValueEnum, Debug, Clone, Eq, PartialEq)]
+pub enum ProxyProtocolVersion {
+    V1,
+    V2,
+}
 
 #[derive(Parser, Debug, Clone)]
 pub(crate) struct Options {
@@ -28,9 +34,14 @@ pub(crate) struct Options {
     pub socket_check_addr: Option<SocketAddr>,
     // check options for http checks
     #[arg(long = "http-url", env = "EASYCHECK_HTTP_URL")]
-    pub http_check_url: Option<Url>,
+    pub http_check_url: Option<Uri>,
     #[arg(long = "http-method", env = "EASYCHECK_HTTP_METHOD")]
     pub http_check_method: Option<Method>,
     #[arg(long = "http-status-codes", env = "EASYCHECK_HTTP_STATUS_CODES")]
     pub http_check_response_codes: Option<Vec<StatusCode>>,
+    #[arg(
+        long = "http-proxy-protocol-version",
+        env = "EASYCHECK_HTTP_PROXY_PROTOCOL_VERSION"
+    )]
+    pub http_proxy_protocol_version: Option<ProxyProtocolVersion>,
 }
