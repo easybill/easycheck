@@ -11,6 +11,7 @@ use crate::status::status_checker::{StatusCheckResult, StatusChecker};
 
 pub(crate) struct NetworkConnectionCheck {
     target_address: SocketAddr,
+    read_initial_response: bool,
 }
 
 #[async_trait]
@@ -18,7 +19,14 @@ impl StatusChecker for NetworkConnectionCheck {
     fn from_options(options: &Options) -> anyhow::Result<Option<Self>> {
         match options.socket_check_addr.to_owned() {
             None => Ok(None),
-            Some(target_address) => Ok(Some(Self { target_address })),
+            Some(target_address) => {
+                let read_initial_response =
+                    options.socket_check_read_initial_response.unwrap_or(false);
+                Ok(Some(Self {
+                    target_address,
+                    read_initial_response,
+                }))
+            }
         }
     }
 
@@ -47,6 +55,14 @@ impl StatusChecker for NetworkConnectionCheck {
                         Ok(StatusCheckResult::new_failure(failure_reason))
                     }
                     Ok(mut tcp_stream) => {
+                        if self.read_initial_response {
+                            if let Some(result) =
+                                self.read_and_discard_response(&mut tcp_stream).await
+                            {
+                                return Ok(result);
+                            }
+                        }
+
                         // connection successful
                         if let Err(err) = tcp_stream.write_all(b"QUIT\n").await {
                             let failure_reason = format!(
@@ -57,13 +73,9 @@ impl StatusChecker for NetworkConnectionCheck {
                         }
 
                         // receive & discard response from server
-                        let mut buffer = [0; 1024];
-                        if let Err(err) = tcp_stream.read(&mut buffer).await {
-                            let failure_reason = format!(
-                                "error receiving response from {}: {}",
-                                self.target_address, err
-                            );
-                            return Ok(StatusCheckResult::new_failure(failure_reason));
+                        if let Some(result) = self.read_and_discard_response(&mut tcp_stream).await
+                        {
+                            return Ok(result);
                         }
 
                         // successful check
@@ -72,5 +84,19 @@ impl StatusChecker for NetworkConnectionCheck {
                 }
             }
         }
+    }
+}
+
+impl NetworkConnectionCheck {
+    async fn read_and_discard_response(
+        &self,
+        tcp_stream: &mut TcpStream,
+    ) -> Option<StatusCheckResult> {
+        let mut buffer = [0; 1024];
+        if let Err(err) = tcp_stream.read(&mut buffer).await {
+            let failure_reason = format!("error receiving response: {}", err);
+            return Some(StatusCheckResult::new_failure(failure_reason));
+        }
+        None
     }
 }

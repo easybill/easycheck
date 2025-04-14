@@ -32,6 +32,11 @@ pub(crate) struct Options {
     // check options for plain sockets
     #[arg(long = "socket-addr", env = "EASYCHECK_SOCKET_ADDR")]
     pub socket_check_addr: Option<SocketAddr>,
+    #[arg(
+        long = "read-initial-response",
+        env = "EASYCHECK_READ_INITIAL_RESPONSE"
+    )]
+    pub socket_check_read_initial_response: Option<bool>,
     // check options for http checks
     #[arg(long = "http-url", env = "EASYCHECK_HTTP_URL")]
     pub http_check_url: Option<Uri>,
