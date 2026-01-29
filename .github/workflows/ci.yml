@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -34,10 +34,10 @@ jobs:
           components: rustfmt, clippy
 
       - name: Run rustfmt
-        uses: clechasseur/rs-fmt-check@v2
+        uses: clechasseur/rs-fmt-check@v3
 
       - name: Run clippy
-        uses: clechasseur/rs-clippy-check@v3
+        uses: clechasseur/rs-clippy-check@v5
 
   build:
     permissions: read-all
@@ -57,7 +57,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -71,10 +71,10 @@ jobs:
           key: ${{ matrix.platform.target }}
 
       - name: Compile Binary
-        uses: clechasseur/rs-cargo@v2
+        uses: clechasseur/rs-cargo@v4
         with:
+          tool: cross
           command: build
-          use-cross: true
           args: --release --target ${{ matrix.platform.target }} --bin easycheck
 
       - name: Move artifacts
@@ -83,7 +83,7 @@ jobs:
           cp target/${{ matrix.platform.target }}/release/easycheck artifact/easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           path: artifact/easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
           name: easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
@@ -106,13 +106,13 @@ jobs:
         run: echo "TAG_NAME=1.$RUN.$(($ATTEMPT - 1))" >> $GITHUB_ENV;
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: binaries
 
       - name: Generate changelog
         id: changelog_generate
-        uses: mikepenz/release-changelog-builder-action@v4
+        uses: mikepenz/release-changelog-builder-action@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -121,7 +121,7 @@ jobs:
           configurationJson: '{"max_tags_to_fetch":5,"categories":[],"template":"#{{UNCATEGORIZED}}","pr_template":"- #{{TITLE}} (##{{NUMBER}} by #{{AUTHOR}})"}'
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: false
