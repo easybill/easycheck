@@ -21,6 +21,7 @@ pub(crate) struct HttpResponseCheck {
     remote_addr: SocketAddr,
     host_header_value: String,
     endpoint: Uri,
+    request_line_target: String,
     http_method: Method,
     up_status_codes: Vec<StatusCode>,
     proxy_protocol_version: Option<ProxyProtocolVersion>,
@@ -60,10 +61,27 @@ impl StatusChecker for HttpResponseCheck {
                     .unwrap_or(vec![StatusCode::OK]);
                 let proxy_protocol_version = options.http_proxy_protocol_version.clone();
 
+                // extracts the path and query part of the uri to use for the request line
+                // GET <request_line_target> ...
+                // this must start with a '/', therefore the extra logic in the mapping step,
+                // as PathAndQuery.as_str() does not return a leading / if only the query part exists
+                let request_line_target = endpoint
+                    .path_and_query()
+                    .map(|pq| {
+                        let pg_str = pq.as_str();
+                        if pg_str.starts_with('/') {
+                            pg_str.to_string()
+                        } else {
+                            format!("/{}", pg_str)
+                        }
+                    })
+                    .unwrap_or_else(|| "/".to_string());
+
                 Ok(Some(Self {
                     remote_addr,
                     host_header_value,
                     endpoint,
+                    request_line_target,
                     http_method,
                     up_status_codes,
                     proxy_protocol_version,
@@ -89,7 +107,7 @@ impl StatusChecker for HttpResponseCheck {
             tokio::spawn(connection);
 
             let request = Request::builder()
-                .uri(&self.endpoint)
+                .uri(&self.request_line_target)
                 .method(&self.http_method)
                 .header(HOST, &self.host_header_value)
                 .body(Empty::<Bytes>::new())?;
