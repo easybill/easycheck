@@ -95,6 +95,12 @@ impl StatusChecker for HttpResponseCheck {
     }
 
     async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+        log::debug!(
+            "checking http endpoint {} ({} {})",
+            &self.endpoint,
+            &self.http_method,
+            &self.request_line_target
+        );
         let response_code = timeout(Duration::from_secs(5), async {
             let mut remote_stream = TcpStream::connect(&self.remote_addr).await?;
             if let Some(proxy_protocol_version) = &self.proxy_protocol_version {
@@ -122,5 +128,72 @@ impl StatusChecker for HttpResponseCheck {
             StatusCheckResult::new_failure(format!("received status {}", &response_code))
         };
         Ok(check_result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::routing::get;
+    use axum::Router;
+    use tokio::net::TcpListener;
+
+    async fn start_test_server(status: StatusCode) -> SocketAddr {
+        let app = Router::new().route("/health", get(move || async move { (status, "ok") }));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
+    fn make_check(addr: SocketAddr) -> HttpResponseCheck {
+        let endpoint: Uri = format!("http://{}/health", addr).parse().unwrap();
+        HttpResponseCheck {
+            remote_addr: addr,
+            host_header_value: addr.to_string(),
+            endpoint,
+            request_line_target: "/health".to_string(),
+            http_method: Method::GET,
+            up_status_codes: vec![StatusCode::OK],
+            proxy_protocol_version: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn returns_success_for_200() {
+        let addr = start_test_server(StatusCode::OK).await;
+        let check = make_check(addr);
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn returns_failure_for_500() {
+        let addr = start_test_server(StatusCode::INTERNAL_SERVER_ERROR).await;
+        let check = make_check(addr);
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_some());
+        assert!(result.failure_reason.unwrap().contains("500"));
+    }
+
+    #[tokio::test]
+    async fn connection_refused_returns_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let check = make_check(addr);
+        let result = check.execute_check().await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn check_name_contains_endpoint() {
+        let addr: SocketAddr = "127.0.0.1:9999".parse().unwrap();
+        let check = make_check(addr);
+        let name = check.check_name();
+        assert!(name.contains("127.0.0.1:9999"));
     }
 }

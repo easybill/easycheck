@@ -35,6 +35,11 @@ impl StatusChecker for NetworkConnectionCheck {
     }
 
     async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+        log::debug!(
+            "checking network connection to {} (read_initial_response={})",
+            self.target_address,
+            self.read_initial_response
+        );
         match timeout(
             Duration::from_secs(5),
             TcpStream::connect(&self.target_address),
@@ -98,5 +103,97 @@ impl NetworkConnectionCheck {
             return Some(StatusCheckResult::new_failure(failure_reason));
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn connect_to_open_port_returns_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Accept connections and respond in the background
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        let check = NetworkConnectionCheck {
+            target_address: addr,
+            read_initial_response: false,
+        };
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn connect_to_closed_port_returns_failure() {
+        // Bind and immediately drop to get an unused port
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let check = NetworkConnectionCheck {
+            target_address: addr,
+            read_initial_response: false,
+        };
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_some());
+        assert!(result
+            .failure_reason
+            .unwrap()
+            .contains("error connecting to"));
+    }
+
+    #[tokio::test]
+    async fn read_initial_response_with_banner_returns_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let _ = stream.write_all(b"220 Welcome\r\n").await;
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        let check = NetworkConnectionCheck {
+            target_address: addr,
+            read_initial_response: true,
+        };
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_none());
+    }
+
+    #[test]
+    fn check_name_contains_address() {
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let check = NetworkConnectionCheck {
+            target_address: addr,
+            read_initial_response: false,
+        };
+        let name = check.check_name();
+        assert!(name.contains("127.0.0.1:8080"));
     }
 }

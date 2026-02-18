@@ -58,3 +58,33 @@ impl StatusCheckResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_success_has_no_failure_and_no_ignore() {
+        let result = StatusCheckResult::new_success();
+        assert!(result.failure_reason.is_none());
+        assert!(!result.ignore_other_results);
+    }
+
+    #[test]
+    fn new_failure_has_failure_reason_and_no_ignore() {
+        let result = StatusCheckResult::new_failure("something broke".to_string());
+        assert_eq!(result.failure_reason.as_deref(), Some("something broke"));
+        assert!(!result.ignore_other_results);
+    }
+
+    #[test]
+    fn ignore_other_results_sets_flag() {
+        let result = StatusCheckResult::new_success().ignore_other_results();
+        assert!(result.ignore_other_results);
+        assert!(result.failure_reason.is_none());
+
+        let result = StatusCheckResult::new_failure("fail".to_string()).ignore_other_results();
+        assert!(result.ignore_other_results);
+        assert_eq!(result.failure_reason.as_deref(), Some("fail"));
+    }
+}

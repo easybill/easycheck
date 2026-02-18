@@ -81,9 +81,16 @@ impl StatusManager {
             .map(|checker| checker.execute_check())
             .collect();
         let results = join_all(check_futures).await;
+        log::debug!("executed {} status checks", results.len());
         for (checker, result) in self.status_checker.iter().zip(results) {
             match result {
                 Ok(check_result) => {
+                    log::debug!(
+                        "check '{}': failure_reason={:?}, ignore_other_results={}",
+                        checker.check_name(),
+                        check_result.failure_reason,
+                        check_result.ignore_other_results
+                    );
                     match check_result.failure_reason {
                         // failure reason is present and all other checks should be skipped, only
                         // return this failure reason
@@ -111,7 +118,8 @@ impl StatusManager {
                         None => {}
                     }
                 }
-                Err(error) => {
+                Err(ref error) => {
+                    log::debug!("check '{}' errored: {}", checker.check_name(), error);
                     // checker failed with an error, assume it's an issue that makes the backend be down
                     let failure_reason = format!("check failed with error: {}", error);
                     let failing_check = FailingCheck::new_from_check(checker, failure_reason);
@@ -140,5 +148,142 @@ impl StatusManager {
         self.status_holder
             .update_current_status(check_results)
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::status::status_checker::StatusCheckResult;
+
+    struct AlwaysSuccess;
+    #[async_trait::async_trait]
+    impl StatusChecker for AlwaysSuccess {
+        fn from_options(_: &Options) -> anyhow::Result<Option<Self>> {
+            Ok(Some(Self))
+        }
+        fn check_name(&self) -> String {
+            "always_success".to_string()
+        }
+        async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+            Ok(StatusCheckResult::new_success())
+        }
+    }
+
+    struct AlwaysFail;
+    #[async_trait::async_trait]
+    impl StatusChecker for AlwaysFail {
+        fn from_options(_: &Options) -> anyhow::Result<Option<Self>> {
+            Ok(Some(Self))
+        }
+        fn check_name(&self) -> String {
+            "always_fail".to_string()
+        }
+        async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+            Ok(StatusCheckResult::new_failure("always fails".to_string()))
+        }
+    }
+
+    struct ErrorChecker;
+    #[async_trait::async_trait]
+    impl StatusChecker for ErrorChecker {
+        fn from_options(_: &Options) -> anyhow::Result<Option<Self>> {
+            Ok(Some(Self))
+        }
+        fn check_name(&self) -> String {
+            "error_checker".to_string()
+        }
+        async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+            Err(anyhow::anyhow!("check exploded"))
+        }
+    }
+
+    struct ForceSuccess;
+    #[async_trait::async_trait]
+    impl StatusChecker for ForceSuccess {
+        fn from_options(_: &Options) -> anyhow::Result<Option<Self>> {
+            Ok(Some(Self))
+        }
+        fn check_name(&self) -> String {
+            "force_success".to_string()
+        }
+        async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+            Ok(StatusCheckResult::new_success().ignore_other_results())
+        }
+    }
+
+    fn make_manager(checkers: Vec<Box<dyn StatusChecker>>) -> StatusManager {
+        StatusManager {
+            status_checker: checkers,
+            status_holder: StatusHolder::new_initial_failed(),
+        }
+    }
+
+    #[tokio::test]
+    async fn all_pass_returns_200() {
+        let manager = make_manager(vec![Box::new(AlwaysSuccess), Box::new(AlwaysSuccess)]);
+        manager.execute_status_checks().await;
+        let status = manager.status_holder().current_status().await;
+        assert_eq!(status.api_response_code, StatusCode::OK);
+        assert!(status.failing_checks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn one_fails_returns_503() {
+        let manager = make_manager(vec![Box::new(AlwaysSuccess), Box::new(AlwaysFail)]);
+        manager.execute_status_checks().await;
+        let status = manager.status_holder().current_status().await;
+        assert_eq!(status.api_response_code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(status.failing_checks.len(), 1);
+        assert_eq!(status.failing_checks[0].check_name, "always_fail");
+    }
+
+    #[tokio::test]
+    async fn multiple_fail_lists_all() {
+        let manager = make_manager(vec![Box::new(AlwaysFail), Box::new(AlwaysFail)]);
+        manager.execute_status_checks().await;
+        let status = manager.status_holder().current_status().await;
+        assert_eq!(status.api_response_code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(status.failing_checks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn error_treated_as_failure() {
+        let manager = make_manager(vec![Box::new(ErrorChecker)]);
+        manager.execute_status_checks().await;
+        let status = manager.status_holder().current_status().await;
+        assert_eq!(status.api_response_code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(status.failing_checks.len(), 1);
+        assert!(status.failing_checks[0]
+            .failure_reason
+            .contains("check exploded"));
+    }
+
+    #[tokio::test]
+    async fn force_success_overrides_failures() {
+        // ForceSuccess is first and clears other failures
+        let manager = make_manager(vec![Box::new(ForceSuccess), Box::new(AlwaysFail)]);
+        manager.execute_status_checks().await;
+        let status = manager.status_holder().current_status().await;
+        assert_eq!(status.api_response_code, StatusCode::OK);
+        assert!(status.failing_checks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_checkers_returns_200() {
+        let manager = make_manager(vec![]);
+        manager.execute_status_checks().await;
+        let status = manager.status_holder().current_status().await;
+        assert_eq!(status.api_response_code, StatusCode::OK);
+        assert!(status.failing_checks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn initial_state_is_503() {
+        let manager = make_manager(vec![Box::new(AlwaysSuccess)]);
+        let status = manager.status_holder().current_status().await;
+        assert_eq!(status.api_response_code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(status.failing_checks.len(), 1);
+        assert_eq!(status.failing_checks[0].check_name, "Initial Check");
     }
 }
