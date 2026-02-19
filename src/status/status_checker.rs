@@ -2,17 +2,7 @@ use async_trait::async_trait;
 
 use crate::options::Options;
 
-/// The result of a status check.
-pub(crate) struct StatusCheckResult {
-    /// The reason why the status check failed. If present the check is
-    /// considered as failed, if absent the check was successful.
-    pub failure_reason: Option<String>,
-    /// Indicate if results from other status checkers should be ignored
-    /// and only this result should be returned.
-    pub ignore_other_results: bool,
-}
-
-/// Defines the shared behaviour how status checks are executed.
+/// Defines the shared behavior how status checks are executed.
 #[async_trait]
 pub trait StatusChecker: Send + Sync {
     /// Constructs a new instance of this checker based on the given options.
@@ -29,6 +19,16 @@ pub trait StatusChecker: Send + Sync {
     /// result is returned and bail_out is true, then the other checks
     /// will not be executed.
     async fn execute_check(&self) -> anyhow::Result<StatusCheckResult>;
+}
+
+/// The result of a status check.
+pub(crate) struct StatusCheckResult {
+    /// The reason why the status check failed. If present the check is
+    /// considered as failed, if absent the check was successful.
+    pub failure_reason: Option<String>,
+    /// Indicate if results from other status checkers should be ignored
+    /// and only this result should be returned.
+    pub ignore_other_results: bool,
 }
 
 impl StatusCheckResult {

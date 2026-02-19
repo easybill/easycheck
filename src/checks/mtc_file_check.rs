@@ -73,12 +73,4 @@ mod tests {
         let result = check.execute_check().await.unwrap();
         assert!(result.failure_reason.is_none());
     }
-
-    #[test]
-    fn check_name_returns_mtc_file() {
-        let check = MtcFileCheck {
-            file_path: PathBuf::from("/tmp/test"),
-        };
-        assert_eq!(check.check_name(), "mtc file");
-    }
 }

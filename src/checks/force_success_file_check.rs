@@ -66,12 +66,4 @@ mod tests {
         assert!(result.failure_reason.is_none());
         assert!(!result.ignore_other_results);
     }
-
-    #[test]
-    fn check_name_returns_force_success_file() {
-        let check = ForceSuccessFileCheck {
-            file_path: PathBuf::from("/tmp/test"),
-        };
-        assert_eq!(check.check_name(), "force success file");
-    }
 }

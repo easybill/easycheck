@@ -2,16 +2,17 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
 
 use crate::options::Options;
 use crate::status::status_checker::{StatusCheckResult, StatusChecker};
+use crate::util::tcp_connector::{RealTcpConnector, TcpConnector};
 
 pub(crate) struct NetworkConnectionCheck {
     target_address: SocketAddr,
     read_initial_response: bool,
+    connector: Box<dyn TcpConnector>,
 }
 
 #[async_trait]
@@ -25,6 +26,7 @@ impl StatusChecker for NetworkConnectionCheck {
                 Ok(Some(Self {
                     target_address,
                     read_initial_response,
+                    connector: Box::new(RealTcpConnector),
                 }))
             }
         }
@@ -42,7 +44,7 @@ impl StatusChecker for NetworkConnectionCheck {
         );
         match timeout(
             Duration::from_secs(5),
-            TcpStream::connect(&self.target_address),
+            self.connector.connect(&self.target_address),
         )
         .await
         {
@@ -59,17 +61,16 @@ impl StatusChecker for NetworkConnectionCheck {
                             format!("error connecting to {}: {}", self.target_address, err);
                         Ok(StatusCheckResult::new_failure(failure_reason))
                     }
-                    Ok(mut tcp_stream) => {
+                    Ok(mut stream) => {
                         if self.read_initial_response {
-                            if let Some(result) =
-                                self.read_and_discard_response(&mut tcp_stream).await
+                            if let Some(result) = Self::read_and_discard_response(&mut stream).await
                             {
                                 return Ok(result);
                             }
                         }
 
                         // connection successful
-                        if let Err(err) = tcp_stream.write_all(b"QUIT\n").await {
+                        if let Err(err) = stream.write_all(b"QUIT\n").await {
                             let failure_reason = format!(
                                 "error sending QUIT message to {}: {}",
                                 self.target_address, err
@@ -78,8 +79,7 @@ impl StatusChecker for NetworkConnectionCheck {
                         }
 
                         // receive & discard response from server
-                        if let Some(result) = self.read_and_discard_response(&mut tcp_stream).await
-                        {
+                        if let Some(result) = Self::read_and_discard_response(&mut stream).await {
                             return Ok(result);
                         }
 
@@ -94,11 +94,10 @@ impl StatusChecker for NetworkConnectionCheck {
 
 impl NetworkConnectionCheck {
     async fn read_and_discard_response(
-        &self,
-        tcp_stream: &mut TcpStream,
+        stream: &mut (dyn AsyncRead + Unpin + Send),
     ) -> Option<StatusCheckResult> {
         let mut buffer = [0; 1024];
-        if let Err(err) = tcp_stream.read(&mut buffer).await {
+        if let Err(err) = stream.read(&mut buffer).await {
             let failure_reason = format!("error receiving response: {}", err);
             return Some(StatusCheckResult::new_failure(failure_reason));
         }
@@ -109,32 +108,60 @@ impl NetworkConnectionCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::tcp_connector::AsyncStream;
+    use std::io;
     use std::net::SocketAddr;
-    use tokio::io::AsyncWriteExt;
-    use tokio::net::TcpListener;
+    use std::pin::Pin;
+
+    struct MockConnector {
+        stream: std::sync::Mutex<Option<Pin<Box<dyn AsyncStream>>>>,
+    }
+
+    impl MockConnector {
+        fn new(stream: impl AsyncStream + 'static) -> Self {
+            Self {
+                stream: std::sync::Mutex::new(Some(Box::pin(stream))),
+            }
+        }
+    }
+
+    struct FailingConnector {
+        error_kind: io::ErrorKind,
+    }
+
+    #[async_trait]
+    impl TcpConnector for MockConnector {
+        async fn connect(&self, _addr: &SocketAddr) -> io::Result<Pin<Box<dyn AsyncStream>>> {
+            self.stream
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or_else(|| io::Error::other("stream already consumed"))
+        }
+    }
+
+    #[async_trait]
+    impl TcpConnector for FailingConnector {
+        async fn connect(&self, _addr: &SocketAddr) -> io::Result<Pin<Box<dyn AsyncStream>>> {
+            Err(io::Error::new(self.error_kind, "connection refused"))
+        }
+    }
+
+    fn dummy_addr() -> SocketAddr {
+        "127.0.0.1:9999".parse().unwrap()
+    }
 
     #[tokio::test]
     async fn connect_to_open_port_returns_success() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        // Accept connections and respond in the background
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
-                tokio::spawn(async move {
-                    let mut buf = [0u8; 1024];
-                    let _ = stream.read(&mut buf).await;
-                    let _ = stream.shutdown().await;
-                });
-            }
-        });
+        let mock_stream = tokio_test::io::Builder::new()
+            .write(b"QUIT\n")
+            .read(b"goodbye")
+            .build();
 
         let check = NetworkConnectionCheck {
-            target_address: addr,
+            target_address: dummy_addr(),
             read_initial_response: false,
+            connector: Box::new(MockConnector::new(mock_stream)),
         };
         let result = check.execute_check().await.unwrap();
         assert!(result.failure_reason.is_none());
@@ -142,14 +169,12 @@ mod tests {
 
     #[tokio::test]
     async fn connect_to_closed_port_returns_failure() {
-        // Bind and immediately drop to get an unused port
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        drop(listener);
-
         let check = NetworkConnectionCheck {
-            target_address: addr,
+            target_address: dummy_addr(),
             read_initial_response: false,
+            connector: Box::new(FailingConnector {
+                error_kind: io::ErrorKind::ConnectionRefused,
+            }),
         };
         let result = check.execute_check().await.unwrap();
         assert!(result.failure_reason.is_some());
@@ -161,26 +186,16 @@ mod tests {
 
     #[tokio::test]
     async fn read_initial_response_with_banner_returns_success() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
-                tokio::spawn(async move {
-                    let _ = stream.write_all(b"220 Welcome\r\n").await;
-                    let mut buf = [0u8; 1024];
-                    let _ = stream.read(&mut buf).await;
-                    let _ = stream.shutdown().await;
-                });
-            }
-        });
+        let mock_stream = tokio_test::io::Builder::new()
+            .read(b"220 Welcome\r\n")
+            .write(b"QUIT\n")
+            .read(b"goodbye")
+            .build();
 
         let check = NetworkConnectionCheck {
-            target_address: addr,
+            target_address: dummy_addr(),
             read_initial_response: true,
+            connector: Box::new(MockConnector::new(mock_stream)),
         };
         let result = check.execute_check().await.unwrap();
         assert!(result.failure_reason.is_none());
@@ -192,6 +207,7 @@ mod tests {
         let check = NetworkConnectionCheck {
             target_address: addr,
             read_initial_response: false,
+            connector: Box::new(RealTcpConnector),
         };
         let name = check.check_name();
         assert!(name.contains("127.0.0.1:8080"));
