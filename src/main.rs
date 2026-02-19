@@ -21,13 +21,7 @@ pub(crate) mod status;
 async fn main() -> anyhow::Result<()> {
     let options = Options::parse();
 
-    env_logger::Builder::new()
-        .filter_level(if options.debug {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
-        })
-        .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let status_manager = match StatusManager::from_options(&options) {
         Ok(manager) => manager,
@@ -54,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(axum_status_holder));
     let listener = TcpListener::bind(&options.bind_host).await?;
     let axum_serve_future = axum::serve(listener, app).into_future();
-    log::info!(
+    eprintln!(
         "easycheck v{} listening on {}",
         env!("CARGO_PKG_VERSION"),
         &options.bind_host
@@ -103,7 +97,6 @@ mod tests {
             http_check_method: None,
             http_check_response_codes: None,
             http_proxy_protocol_version: None,
-            debug: false,
         }
     }
 
