@@ -42,52 +42,45 @@ impl StatusChecker for NetworkConnectionCheck {
             self.target_address,
             self.read_initial_response
         );
-        match timeout(
-            Duration::from_secs(5),
-            self.connector.connect(&self.target_address),
-        )
+        match timeout(Duration::from_secs(5), async {
+            let mut stream = match self.connector.connect(&self.target_address).await {
+                Err(err) => {
+                    let failure_reason =
+                        format!("error connecting to {}: {}", self.target_address, err);
+                    return Ok(StatusCheckResult::new_failure(failure_reason));
+                }
+                Ok(stream) => stream,
+            };
+
+            if self.read_initial_response {
+                if let Some(result) = Self::read_and_discard_response(&mut stream).await {
+                    return Ok(result);
+                }
+            }
+
+            if let Err(err) = stream.write_all(b"QUIT\n").await {
+                let failure_reason = format!(
+                    "error sending QUIT message to {}: {}",
+                    self.target_address, err
+                );
+                return Ok(StatusCheckResult::new_failure(failure_reason));
+            }
+
+            // receive & discard response from server
+            if let Some(result) = Self::read_and_discard_response(&mut stream).await {
+                return Ok(result);
+            }
+
+            Ok(StatusCheckResult::new_success())
+        })
         .await
         {
             Err(_) => {
-                // timeout
-                let failure_reason = format!("timeout connecting to {}", self.target_address);
+                let failure_reason =
+                    format!("timeout checking connection to {}", self.target_address);
                 Ok(StatusCheckResult::new_failure(failure_reason))
             }
-            Ok(connect_result) => {
-                match connect_result {
-                    Err(err) => {
-                        // issue connecting to provided host
-                        let failure_reason =
-                            format!("error connecting to {}: {}", self.target_address, err);
-                        Ok(StatusCheckResult::new_failure(failure_reason))
-                    }
-                    Ok(mut stream) => {
-                        if self.read_initial_response {
-                            if let Some(result) = Self::read_and_discard_response(&mut stream).await
-                            {
-                                return Ok(result);
-                            }
-                        }
-
-                        // connection successful
-                        if let Err(err) = stream.write_all(b"QUIT\n").await {
-                            let failure_reason = format!(
-                                "error sending QUIT message to {}: {}",
-                                self.target_address, err
-                            );
-                            return Ok(StatusCheckResult::new_failure(failure_reason));
-                        }
-
-                        // receive & discard response from server
-                        if let Some(result) = Self::read_and_discard_response(&mut stream).await {
-                            return Ok(result);
-                        }
-
-                        // successful check
-                        Ok(StatusCheckResult::new_success())
-                    }
-                }
-            }
+            Ok(result) => result,
         }
     }
 }
