@@ -39,7 +39,26 @@ jobs:
       - name: Run clippy
         uses: clechasseur/rs-clippy-check@v5
 
+  test:
+    needs: [ "check" ]
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Initialize Rust caching
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --all-targets
+
   build:
+    needs: [ "test" ]
     permissions: read-all
     runs-on: ${{ matrix.platform.os }}
     name: Compile ${{ matrix.platform.target }} / ${{ matrix.platform.os }}
@@ -89,7 +108,7 @@ jobs:
           name: easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
 
   release:
-    needs: [ "check", "build" ]
+    needs: [ "check", "test", "build" ]
     name: Publish Release
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' }}
@@ -99,11 +118,20 @@ jobs:
       pull-requests: read
 
     steps:
-      - name: Build tag name
-        env:
-          RUN: ${{ github.run_number }}
-          ATTEMPT: ${{ github.run_attempt }}
-        run: echo "TAG_NAME=1.$RUN.$(($ATTEMPT - 1))" >> $GITHUB_ENV;
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check version was bumped
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          if [ "$VERSION" = "$LATEST_TAG" ]; then
+            echo "::error::Cargo.toml version ($VERSION) matches latest tag. Bump the version before releasing."
+            exit 1
+          fi
+          echo "TAG_NAME=$VERSION" >> $GITHUB_ENV
 
       - name: Download artifacts
         uses: actions/download-artifact@v7

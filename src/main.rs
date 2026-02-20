@@ -16,14 +16,18 @@ pub(crate) mod checks;
 mod http_api_routes;
 pub(crate) mod options;
 pub(crate) mod status;
+pub(crate) mod util;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let options = Options::parse();
+
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let status_manager = match StatusManager::from_options(&options) {
         Ok(manager) => manager,
         Err(error) => {
-            eprintln!(
+            log::error!(
                 "Unable to construct status manager based on provided options: {}",
                 error
             );
@@ -45,19 +49,23 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(axum_status_holder));
     let listener = TcpListener::bind(&options.bind_host).await?;
     let axum_serve_future = axum::serve(listener, app).into_future();
-    println!("bound http listener to {}", &options.bind_host);
+    eprintln!(
+        "easycheck v{} listening on {}",
+        env!("CARGO_PKG_VERSION"),
+        &options.bind_host
+    );
 
     let exit_code = tokio::select! {
         _ = status_updating_task => {
-            eprintln!("Status updater task failed");
+            log::error!("Status updater task failed");
             100
         }
         _ = axum_serve_future => {
-            eprintln!("Serving http endpoint failed");
+            log::error!("Serving http endpoint failed");
             101
         }
         _ = tokio::signal::ctrl_c() => {
-            println!("Quit signal received, exiting!");
+            log::info!("Quit signal received, exiting!");
             0
         }
     };
