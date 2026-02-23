@@ -181,20 +181,7 @@ mod tests {
         "127.0.0.1:9999".parse().unwrap()
     }
 
-    fn make_check(up_status_codes: Vec<StatusCode>) -> HttpResponseCheck {
-        HttpResponseCheck {
-            remote_addr: dummy_addr(),
-            host_header_value: dummy_addr().to_string(),
-            endpoint: format!("http://{}/health", dummy_addr()).parse().unwrap(),
-            request_line_target: "/health".to_string(),
-            http_method: Method::GET,
-            up_status_codes,
-            proxy_protocol_version: None,
-            connector: Box::new(RealTcpConnector),
-        }
-    }
-
-    fn make_check_with_connector(
+    fn make_check(
         up_status_codes: Vec<StatusCode>,
         proxy_protocol_version: Option<ProxyProtocolVersion>,
         connector: Box<dyn TcpConnector>,
@@ -251,14 +238,22 @@ mod tests {
 
     #[test]
     fn matching_status_code_returns_success() {
-        let check = make_check(vec![StatusCode::OK]);
+        let check = make_check(
+            vec![StatusCode::OK],
+            None,
+            Box::new(MockConnector::new(tokio::io::empty())),
+        );
         let result = check.evaluate_response_code(StatusCode::OK);
         assert!(result.failure_reason.is_none());
     }
 
     #[test]
     fn non_matching_status_code_returns_failure() {
-        let check = make_check(vec![StatusCode::OK]);
+        let check = make_check(
+            vec![StatusCode::OK],
+            None,
+            Box::new(MockConnector::new(tokio::io::empty())),
+        );
         let result = check.evaluate_response_code(StatusCode::INTERNAL_SERVER_ERROR);
         assert!(result.failure_reason.is_some());
         assert!(result.failure_reason.unwrap().contains("500"));
@@ -266,7 +261,11 @@ mod tests {
 
     #[test]
     fn multiple_accepted_codes() {
-        let check = make_check(vec![StatusCode::OK, StatusCode::NO_CONTENT]);
+        let check = make_check(
+            vec![StatusCode::OK, StatusCode::NO_CONTENT],
+            None,
+            Box::new(MockConnector::new(tokio::io::empty())),
+        );
         assert!(check
             .evaluate_response_code(StatusCode::OK)
             .failure_reason
@@ -283,7 +282,11 @@ mod tests {
 
     #[test]
     fn check_name_contains_endpoint() {
-        let check = make_check(vec![StatusCode::OK]);
+        let check = make_check(
+            vec![StatusCode::OK],
+            None,
+            Box::new(MockConnector::new(tokio::io::empty())),
+        );
         let name = check.check_name();
         assert!(name.contains("127.0.0.1:9999"));
     }
@@ -294,7 +297,7 @@ mod tests {
 
         tokio::spawn(spawn_http_server(server_stream, StatusCode::OK));
 
-        let check = make_check_with_connector(
+        let check = make_check(
             vec![StatusCode::OK],
             None,
             Box::new(MockConnector::new(client_stream)),
@@ -312,7 +315,7 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
         ));
 
-        let check = make_check_with_connector(
+        let check = make_check(
             vec![StatusCode::OK],
             None,
             Box::new(MockConnector::new(client_stream)),
@@ -334,7 +337,7 @@ mod tests {
             prefix_len,
         ));
 
-        let check = make_check_with_connector(
+        let check = make_check(
             vec![StatusCode::OK],
             Some(ProxyProtocolVersion::V1),
             Box::new(MockConnector::new(client_stream)),
@@ -358,7 +361,7 @@ mod tests {
             prefix_len,
         ));
 
-        let check = make_check_with_connector(
+        let check = make_check(
             vec![StatusCode::OK],
             Some(ProxyProtocolVersion::V2),
             Box::new(MockConnector::new(client_stream)),
@@ -372,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn connection_failure_returns_error() {
-        let check = make_check_with_connector(
+        let check = make_check(
             vec![StatusCode::OK],
             None,
             Box::new(FailingConnector {

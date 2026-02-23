@@ -56,7 +56,7 @@ impl EasycheckProcess {
             if tokio::time::Instant::now() > deadline {
                 panic!("easycheck did not become ready within {:?}", POLL_TIMEOUT);
             }
-            if client.get(&self.base_url()).send().await.is_ok() {
+            if client.get(self.base_url()).send().await.is_ok() {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
