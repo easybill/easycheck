@@ -27,6 +27,7 @@ impl StatusChecker for ForceSuccessFileCheck {
     }
 
     async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+        log::debug!("checking force success file at {:?}", &self.file_path);
         match fs::metadata(&self.file_path).await {
             Ok(_) => {
                 let check_result = StatusCheckResult::new_success().ignore_other_results();
@@ -37,5 +38,32 @@ impl StatusChecker for ForceSuccessFileCheck {
                 Ok(check_result)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn file_present_returns_success_with_ignore() {
+        let tmp = NamedTempFile::new().unwrap();
+        let check = ForceSuccessFileCheck {
+            file_path: tmp.path().to_path_buf(),
+        };
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_none());
+        assert!(result.ignore_other_results);
+    }
+
+    #[tokio::test]
+    async fn file_absent_returns_success_without_ignore() {
+        let check = ForceSuccessFileCheck {
+            file_path: PathBuf::from("/tmp/easycheck_nonexistent_force_success_test"),
+        };
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_none());
+        assert!(!result.ignore_other_results);
     }
 }

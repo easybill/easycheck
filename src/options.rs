@@ -11,6 +11,7 @@ pub enum ProxyProtocolVersion {
 }
 
 #[derive(Parser, Debug, Clone)]
+#[command(version)]
 pub(crate) struct Options {
     #[arg(long = "bind", env = "EASYCHECK_BIND_HOST", required = true)]
     pub bind_host: String,

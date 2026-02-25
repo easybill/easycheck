@@ -28,6 +28,7 @@ impl StatusChecker for MtcFileCheck {
     }
 
     async fn execute_check(&self) -> anyhow::Result<StatusCheckResult> {
+        log::debug!("checking mtc file at {:?}", &self.file_path);
         match fs::metadata(&self.file_path).await {
             Ok(_) => {
                 let reason = String::from("mtc file exists");
@@ -46,5 +47,30 @@ impl StatusChecker for MtcFileCheck {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn file_present_returns_failure() {
+        let tmp = NamedTempFile::new().unwrap();
+        let check = MtcFileCheck {
+            file_path: tmp.path().to_path_buf(),
+        };
+        let result = check.execute_check().await.unwrap();
+        assert_eq!(result.failure_reason.as_deref(), Some("mtc file exists"));
+    }
+
+    #[tokio::test]
+    async fn file_absent_returns_success() {
+        let check = MtcFileCheck {
+            file_path: PathBuf::from("/tmp/easycheck_nonexistent_mtc_file_test"),
+        };
+        let result = check.execute_check().await.unwrap();
+        assert!(result.failure_reason.is_none());
     }
 }
