@@ -144,13 +144,13 @@ mod tests {
     use std::pin::Pin;
 
     struct MockConnector {
-        stream: std::sync::Mutex<Option<Pin<Box<dyn AsyncStream>>>>,
+        stream: tokio::sync::Mutex<Option<Pin<Box<dyn AsyncStream>>>>,
     }
 
     impl MockConnector {
         fn new(stream: impl AsyncStream + 'static) -> Self {
             Self {
-                stream: std::sync::Mutex::new(Some(Box::pin(stream))),
+                stream: tokio::sync::Mutex::new(Some(Box::pin(stream))),
             }
         }
     }
@@ -164,7 +164,7 @@ mod tests {
         async fn connect(&self, _addr: &SocketAddr) -> io::Result<Pin<Box<dyn AsyncStream>>> {
             self.stream
                 .lock()
-                .unwrap()
+                .await
                 .take()
                 .ok_or_else(|| io::Error::other("stream already consumed"))
         }

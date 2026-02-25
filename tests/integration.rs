@@ -5,8 +5,6 @@ use common::mock_http_server::MockHttpServer;
 use common::mock_proxy_http_server::MockProxyProtocolHttpServer;
 use common::mock_tcp_server::MockTcpServer;
 
-// ---- Group 1: Startup ----
-
 /// Before the first check cycle completes, easycheck returns 503 with "Initial Check".
 #[tokio::test]
 async fn initial_state_returns_503() {
@@ -47,8 +45,6 @@ async fn healthy_after_first_check_cycle() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body, serde_json::json!([]));
 }
-
-// ---- Group 2: File Checks ----
 
 /// When the maintenance file exists, easycheck returns 503.
 #[tokio::test]
@@ -113,8 +109,6 @@ async fn force_success_overrides_all_failures() {
     let resp = reqwest::get(&proc.base_url()).await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
 }
-
-// ---- Group 3: HTTP Check ----
 
 /// HTTP check passes when backend returns 200.
 #[tokio::test]
@@ -218,8 +212,6 @@ async fn http_check_with_proxy_protocol_v2() {
     assert_eq!(resp.status().as_u16(), 200);
 }
 
-// ---- Group 4: TCP/Socket Check ----
-
 /// Socket check passes when TCP server is reachable and responds.
 #[tokio::test]
 async fn socket_check_healthy() {
@@ -277,8 +269,6 @@ async fn socket_check_connection_refused() {
     let body = resp.text().await.unwrap();
     assert!(body.contains("network connection check"));
 }
-
-// ---- Group 5: Combined ----
 
 /// Multiple checks (HTTP + socket) all pass -> 200.
 #[tokio::test]

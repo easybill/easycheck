@@ -8,6 +8,7 @@ use tokio::net::TcpStream;
 /// Combined trait for async read+write streams, needed because Rust does not
 /// allow multiple non-auto traits in a single `dyn` trait object.
 pub(crate) trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncStream for T {}
 
 #[async_trait]

@@ -7,23 +7,23 @@ edition = "2021"
 rust-version = "1.79"
 
 [dependencies]
-anyhow = "*"
-axum = "0.8.*"
-futures = "0.3.*"
-async-trait = "0.1.*"
-http-body-util = "0.1.*"
-tokio = { version = "1.49.*", features = ["full"] }
-hyper-util = { version = "0.1.*", features = ["tokio"] }
-proxy-header = { version = "0.1.*", features = ["tokio"] }
-hyper = { version = "1.8.*", features = ["client", "http1"] }
-serde = { version = "1.0.*", features = ["derive"] }
-clap = { version = "4.5.*", features = ["derive", "env"] }
+anyhow = "1"
+axum = "0.8"
+futures = "0.3"
+async-trait = "0.1"
+http-body-util = "0.1"
+tokio = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+proxy-header = { version = "0.1", features = ["tokio"] }
+hyper = { version = "1", features = ["client", "http1"] }
+serde = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
 env_logger = "0.11"
 
 [dev-dependencies]
 tempfile = "3"
-serde_json = "1.0"
+serde_json = "1"
 tokio-test = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-hyper = { version = "1.8.*", features = ["server"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+hyper = { version = "1.8", features = ["server"] }
