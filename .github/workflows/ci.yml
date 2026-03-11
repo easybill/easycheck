@@ -102,7 +102,7 @@ jobs:
           cp target/${{ matrix.platform.target }}/release/easycheck artifact/easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           path: artifact/easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
           name: easycheck_${{ matrix.platform.osn }}_${{ matrix.platform.arch }}
