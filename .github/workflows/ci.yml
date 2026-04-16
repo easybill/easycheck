@@ -149,7 +149,7 @@ jobs:
           configurationJson: '{"max_tags_to_fetch":5,"categories":[],"template":"#{{UNCATEGORIZED}}","pr_template":"- #{{TITLE}} (##{{NUMBER}} by #{{AUTHOR}})"}'
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           prerelease: false
